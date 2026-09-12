@@ -116,6 +116,13 @@ def generate_launch_description():
         output='screen'
     )
 
+    filtered_scan = PathJoinSubstitution([
+        LaunchConfiguration('namespace'),
+        'sensors',
+        'lidar2d_0',
+        'scan_filtered',
+    ])
+
     # 3. Clearpath Nav2 navigation stack (conditioned on sim_gate)
     nav2_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -124,6 +131,7 @@ def generate_launch_description():
         launch_arguments=[
             ('use_sim_time', LaunchConfiguration('use_sim_time')),
             ('setup_path', LaunchConfiguration('setup_path')),
+            ('scan_topic', filtered_scan),
         ]
     )
 
@@ -136,6 +144,7 @@ def generate_launch_description():
             ('map', LaunchConfiguration('map')),
             ('use_sim_time', LaunchConfiguration('use_sim_time')),
             ('setup_path', LaunchConfiguration('setup_path')),
+            ('scan_topic', filtered_scan),
         ]
     )
 
@@ -150,7 +159,22 @@ def generate_launch_description():
         ]
     )
 
-    # 6. Automatic initial pose publisher (runs with Nav2 after sim_gate opens)
+    # 6. LiDAR self-filter (removes sensor arch returns hitting robot footprint)
+    scan_self_filter_node = Node(
+        package='trajectory_collector',
+        executable='scan_self_filter',
+        namespace=LaunchConfiguration('namespace'),
+        parameters=[{
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+        }],
+        remappings=[
+            ('/tf', 'tf'),
+            ('/tf_static', 'tf_static'),
+        ],
+        output='screen'
+    )
+
+    # 7. Automatic initial pose publisher (runs with Nav2 after sim_gate opens)
     initial_pose_node = Node(
         package='trajectory_collector',
         executable='set_initial_pose',
@@ -166,7 +190,13 @@ def generate_launch_description():
 
     def on_sim_ready(event, context):
         if event.returncode == 0:
-            return [nav2_launch, localization_launch, viz_launch, initial_pose_node]
+            return [
+                scan_self_filter_node,
+                nav2_launch,
+                localization_launch,
+                viz_launch,
+                initial_pose_node,
+            ]
         msg = f'Sim gate failed (exit code {event.returncode}); navigation stack aborted.'
         return [LogInfo(msg=msg)]
 
