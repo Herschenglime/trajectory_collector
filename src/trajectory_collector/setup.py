@@ -37,6 +37,7 @@ setup(
             'sim_gate = trajectory_collector.sim_gate:main',
             'set_initial_pose = trajectory_collector.set_initial_pose:main',
             'scan_self_filter = trajectory_collector.scan_self_filter:main',
+            'navigate_to_goal = trajectory_collector.navigate_to_goal:main',
         ],
     },
 )
