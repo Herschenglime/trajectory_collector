@@ -84,6 +84,8 @@ ros2 launch trajectory_collector view_bag.launch.py
 
 ---
 
+---
+
 ### 3. Simulation Bringup Only (`bringup.launch.py`)
 
 Brings up Gazebo simulation, Nav2 stack, AMCL, and RViz without sending an automated goal (useful for interactive manual navigation in RViz):
@@ -91,6 +93,35 @@ Brings up Gazebo simulation, Nav2 stack, AMCL, and RViz without sending an autom
 ```bash
 ros2 launch trajectory_collector bringup.launch.py
 ```
+
+---
+
+### 4. Offline Waypoint Generation (`generate_waypoints`)
+
+Generate topologically reachable, obstacle-cleared `(start, goal)` waypoint pairs with configurable outputs:
+
+```bash
+# Generate 10 waypoints on the default warehouse map with a visual preview
+ros2 run trajectory_collector generate_waypoints \
+  --map warehouse \
+  -n 10 \
+  -o ~/husky_ws/data/waypoints.csv \
+  --preview ~/husky_ws/data/waypoints_preview.png
+```
+
+#### CLI Options
+
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `--map`, `-m` | `warehouse` | Map preset name (`warehouse`) or path to custom `map.yaml` |
+| `-n`, `--num-samples` | `10` | Number of distinct waypoint pairs to generate |
+| `-o`, `--output` | `data/waypoints.csv` | Output CSV file path |
+| `--preview` | `""` | Filepath to save PNG map overlay preview |
+| `--clearance` | `0.65` | Robot safety clearance radius in meters (Husky A200) |
+| `--min-dist` / `--max-dist` | `4.0` / `25.0` | Minimum and maximum straight-line route distances (meters) |
+| `--similarity-thresh` | `2.0` | Minimum separation distance between distinct routes |
+| `--seed` | `None` | Random seed for deterministic reproducibility |
+| `--random-yaw` | `false` | Randomize headings instead of aligning directly toward goal |
 
 ---
 
@@ -127,6 +158,7 @@ Because files are stored in native `.mcap` format, you can also drag and drop th
 * [`collect_trajectory.launch.py`](launch/collect_trajectory.launch.py): Top-level orchestrator for simulation, navigation, and bag capture.
 * [`view_bag.launch.py`](launch/view_bag.launch.py): Single-command bag playback and RViz visualizer.
 * [`bringup.launch.py`](launch/bringup.launch.py): Simulation and navigation bringup with gated synchronization.
+* [`generate_waypoints.py`](trajectory_collector/generate_waypoints.py): Offline planner sampling reachable, clearance-verified waypoint pairs.
 * [`navigate_to_goal.py`](trajectory_collector/navigate_to_goal.py): Event-driven node verifying bt_navigator/costmap readiness, dispatching goal, and managing `rosbag2_py` lifecycle.
 * [`scan_self_filter.py`](trajectory_collector/scan_self_filter.py): Geometric filter masking out Husky sensor arch reflections.
 * [`set_initial_pose.py`](trajectory_collector/set_initial_pose.py): Publishes initial pose to AMCL on stack startup.
