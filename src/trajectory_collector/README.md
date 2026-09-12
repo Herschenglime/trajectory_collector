@@ -6,6 +6,12 @@ Automated trajectory execution, multi-modal sensor recording (MCAP), and synchro
 
 ## Quick Start (30 Seconds)
 
+### 0. Environment Setup
+Follow the clearpath installation guide here:
+https://docs.clearpathrobotics.com/docs/ros/tutorials/simulator/overview
+
+To match this guide, be sure to name your workspace husky_ws.
+
 ### 1. Build & Source
 
 ```bash
@@ -55,9 +61,13 @@ ros2 launch trajectory_collector collect_trajectory.launch.py [arguments]
 
 | Argument | Default | Description |
 | :--- | :--- | :--- |
+| `start_x` | `0.0` | Initial spawn X coordinate (meters) |
+| `start_y` | `0.0` | Initial spawn Y coordinate (meters) |
+| `start_yaw` | `0.0` | Initial spawn yaw orientation (radians) |
 | `goal_x` | `2.0` | Target X coordinate (meters) |
 | `goal_y` | `2.0` | Target Y coordinate (meters) |
 | `goal_yaw` | `0.0` | Target yaw orientation (radians) |
+| `headless` | `false` | Run simulation headless (Gazebo server-only `-s`, no RViz) |
 | `record_bag` | `true` | Record trajectory and sensor streams (`true` / `false`) |
 | `bag_directory`| `~/husky_ws/data/trajectories` | Output directory for rosbags |
 | `bag_name` | `""` | Bag folder name (defaults to `traj_<YYYYMMDD_HHMMSS>`) |
@@ -127,25 +137,30 @@ ros2 run trajectory_collector generate_waypoints \
 
 ### 5. Automated Batch Trajectory Sweep (`run_sweep`)
 
-Execute multiple trajectory runs sequentially in cold-restart isolation, using native ROS 2 `LaunchService` process supervision:
+Execute multiple trajectory runs sequentially in cold-restart isolation, using process session isolation:
 
 ```bash
 # Run all waypoints in data/waypoints.csv
 ros2 run trajectory_collector run_sweep -w data/waypoints.csv -o data/trajectories
 
+# Run headless (server-only Gazebo, no RViz, zero GUI overhead)
+ros2 run trajectory_collector run_sweep -w data/waypoints.csv -o data/trajectories --headless
+
 # Run a subset of 3 trajectories starting at trajectory ID 2
 ros2 run trajectory_collector run_sweep -w data/waypoints.csv -o data/trajectories -n 3 --start-id 2
 
-# Resume into an existing non-empty directory
-ros2 run trajectory_collector run_sweep -w data/waypoints.csv -o data/trajectories --overwrite --start-id 5
+# Resume into an existing non-empty directory with custom cooldown
+ros2 run trajectory_collector run_sweep -w data/waypoints.csv -o data/trajectories --overwrite --start-id 5 --cooldown 8.0
 ```
 
 #### Key Characteristics
 * **Zero State Leakage**: Each trajectory spins up a fresh simulation and terminates cleanly via `auto_shutdown:=true`.
-* **Supervised Lifecycle**: Process lifecycle managed by `launch.LaunchService` with clean child process termination and signal handling.
+* **Process Session Isolation**: Each trajectory executes in an isolated process group (`start_new_session=True`), ensuring child `SIGINT` termination cleanly tears down Gazebo and Nav2 without interrupting the parent runner.
+* **True Headless Simulation**: Optional `--headless` flag cuts out GUI renderers, running Gazebo server-only (`-s`) and disabling RViz to drastically reduce CPU/GPU latency.
+* **Reliable Status Tracking**: Direct `status.json` recording captures exact run outcomes (`SUCCESS`, `FAILED`, `TIMEOUT`, `ABORTED`, `INIT_FAILED`) without heuristic string parsing.
 * **Append-Only Summary**: Flushes run metrics immediately to `sweep_summary.csv` (`id,status,exit_code,duration_s,distance,start_x,start_y,goal_x,goal_y,bag_path`).
 * **Pre-flight Safety**: Halts immediately if destination directory already exists and contains data, unless `--overwrite` is specified.
-* **Fixed 5-Minute Safety Ceiling**: Default 300-second timeout halts stubborn planning loops while allowing nominal runs to finish and exit immediately.
+* **Fixed Safety Ceiling & Startup Guards**: Trajectory timeout (default 300s) and startup prerequisite guard (45s) prevent orphaned runs.
 
 #### CLI Options
 
@@ -153,11 +168,12 @@ ros2 run trajectory_collector run_sweep -w data/waypoints.csv -o data/trajectori
 | :--- | :--- | :--- |
 | `-w`, `--waypoints` | `data/waypoints.csv` | Path to waypoints CSV file |
 | `-o`, `--output-dir`| `data/trajectories` | Directory for output rosbags and `sweep_summary.csv` |
+| `--headless` | `false` | Run simulation headless without Gazebo GUI or RViz |
 | `--overwrite` | `false` | Allow writing into an existing non-empty destination directory |
 | `-n`, `--count` | `None` (all) | Maximum number of trajectories to run |
 | `--start-id` | `0` | Trajectory ID to start from (useful for resuming) |
 | `--timeout` | `300.0` | Maximum seconds allowed per trajectory (5 minutes) |
-| `--cooldown` | `3.0` | Pause seconds between consecutive runs |
+| `--cooldown` | `5.0` | Pause seconds between consecutive runs |
 
 ---
 
@@ -191,14 +207,15 @@ Because files are stored in native `.mcap` format, you can also drag and drop th
 
 ## Package Components
 
-* [`collect_trajectory.launch.py`](launch/collect_trajectory.launch.py): Top-level orchestrator for simulation, navigation, and bag capture.
-* [`view_bag.launch.py`](launch/view_bag.launch.py): Single-command bag playback and RViz visualizer.
-* [`bringup.launch.py`](launch/bringup.launch.py): Simulation and navigation bringup with gated synchronization.
-* [`generate_waypoints.py`](trajectory_collector/generate_waypoints.py): Offline planner sampling reachable, clearance-verified waypoint pairs.
-* [`run_sweep.py`](trajectory_collector/run_sweep.py): Batch orchestrator executing sequential cold restarts supervised by `launch.LaunchService`.
-* [`navigate_to_goal.py`](trajectory_collector/navigate_to_goal.py): Event-driven node verifying bt_navigator/costmap readiness, dispatching goal, and managing `rosbag2_py` lifecycle.
+* [`collect_trajectory.launch.py`](launch/collect_trajectory.launch.py): Top-level orchestrator for simulation, navigation, and bag capture with process-group Ctrl-C auto-shutdown.
+* [`simulation.launch.py`](launch/simulation.launch.py): Forked Gazebo simulation launcher supporting server-only headless mode (`-s`).
+* [`view_bag.launch.py`](launch/view_bag.launch.py): Single-command bag playback and synchronized RViz visualizer.
+* [`bringup.launch.py`](launch/bringup.launch.py): Simulation and navigation bringup with gated synchronization and headless support.
+* [`generate_waypoints.py`](trajectory_collector/generate_waypoints.py): Offline planner sampling reachable, clearance-verified waypoint pairs with PNG previews.
+* [`run_sweep.py`](trajectory_collector/run_sweep.py): Batch orchestrator executing sequential cold restarts in isolated process sessions with headless support.
+* [`navigate_to_goal.py`](trajectory_collector/navigate_to_goal.py): Event-driven node with startup timeout, costmap readiness verification, goal dispatch, and `rosbag2_py` lifecycle management.
 * [`scan_self_filter.py`](trajectory_collector/scan_self_filter.py): Geometric filter masking out Husky sensor arch reflections.
-* [`set_initial_pose.py`](trajectory_collector/set_initial_pose.py): Publishes initial pose to AMCL on stack startup.
+* [`set_initial_pose.py`](trajectory_collector/set_initial_pose.py): Publishes initial pose to AMCL on stack startup with exit code propagation.
 * [`sim_gate.py`](trajectory_collector/sim_gate.py): Synchronization gate ensuring simulator publishes clock/odometry before starting Nav2.
 
 ---
