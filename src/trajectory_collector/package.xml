@@ -10,6 +10,7 @@
 
   <buildtool_depend>ament_python</buildtool_depend>
   <depend>rclpy</depend>
+  <depend>nav_msgs</depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>clearpath_gz</exec_depend>

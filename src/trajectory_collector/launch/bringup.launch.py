@@ -13,9 +13,20 @@
 # limitations under the License.
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    LogInfo,
+    RegisterEventHandler,
+)
+from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import (
+    EnvironmentVariable,
+    LaunchConfiguration,
+    PathJoinSubstitution,
+)
+from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -57,7 +68,7 @@ def generate_launch_description():
 
     setup_path_arg = DeclareLaunchArgument(
         'setup_path',
-        default_value='/etc/clearpath/',
+        default_value=PathJoinSubstitution([EnvironmentVariable('HOME'), 'clearpath']),
         description='Clearpath setup path containing robot.yaml'
     )
 
@@ -73,7 +84,18 @@ def generate_launch_description():
         ]
     )
 
-    # 2. Clearpath Nav2 navigation stack
+    # 2. Gate Node (waits for robot to spawn and odometry to publish)
+    sim_gate = Node(
+        package='trajectory_collector',
+        executable='sim_gate',
+        parameters=[{
+            'topic': PathJoinSubstitution([LaunchConfiguration('namespace'), 'platform/odom']),
+            'timeout': 30.0,
+        }],
+        output='screen'
+    )
+
+    # 3. Clearpath Nav2 navigation stack (conditioned on sim_gate)
     nav2_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([pkg_clearpath_nav2_demos, 'launch', 'nav2.launch.py'])
@@ -84,7 +106,7 @@ def generate_launch_description():
         ]
     )
 
-    # 3. Clearpath Nav2 localization
+    # 4. Clearpath Nav2 localization (conditioned on sim_gate)
     localization_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([pkg_clearpath_nav2_demos, 'launch', 'localization.launch.py'])
@@ -96,7 +118,7 @@ def generate_launch_description():
         ]
     )
 
-    # 4. Clearpath RViz visualization
+    # 5. Clearpath RViz visualization (conditioned on sim_gate)
     viz_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([pkg_clearpath_viz, 'launch', 'view_navigation.launch.py'])
@@ -107,6 +129,19 @@ def generate_launch_description():
         ]
     )
 
+    def on_sim_ready(event, context):
+        if event.returncode == 0:
+            return [nav2_launch, localization_launch, viz_launch]
+        msg = f'Sim gate failed (exit code {event.returncode}); navigation stack aborted.'
+        return [LogInfo(msg=msg)]
+
+    start_nav_event = RegisterEventHandler(
+        OnProcessExit(
+            target_action=sim_gate,
+            on_exit=on_sim_ready
+        )
+    )
+
     return LaunchDescription([
         use_sim_time_arg,
         namespace_arg,
@@ -114,7 +149,6 @@ def generate_launch_description():
         map_arg,
         setup_path_arg,
         simulation_launch,
-        nav2_launch,
-        localization_launch,
-        viz_launch,
+        sim_gate,
+        start_nav_event,
     ])
