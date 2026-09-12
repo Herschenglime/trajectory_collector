@@ -101,7 +101,7 @@ def generate_launch_description():
 
     goal_y_arg = DeclareLaunchArgument(
         'goal_y',
-        default_value='0.0',
+        default_value='2.0',
         description='Navigation target goal Y coordinate'
     )
 
@@ -115,6 +115,30 @@ def generate_launch_description():
         'timeout',
         default_value='120.0',
         description='Maximum allowed seconds for goal navigation'
+    )
+
+    record_bag_arg = DeclareLaunchArgument(
+        'record_bag',
+        default_value='true',
+        choices=['true', 'false'],
+        description='Record navigation trajectory and sensors to MCAP bag if true'
+    )
+
+    bag_directory_arg = DeclareLaunchArgument(
+        'bag_directory',
+        default_value=PathJoinSubstitution([
+            EnvironmentVariable('HOME'),
+            'husky_ws',
+            'data',
+            'trajectories'
+        ]),
+        description='Directory path to store recorded rosbags'
+    )
+
+    bag_name_arg = DeclareLaunchArgument(
+        'bag_name',
+        default_value='',
+        description='Custom folder name for recorded bag (empty for timestamped auto-name)'
     )
 
     auto_shutdown_arg = DeclareLaunchArgument(
@@ -152,6 +176,9 @@ def generate_launch_description():
             'goal_yaw': LaunchConfiguration('goal_yaw'),
             'timeout': LaunchConfiguration('timeout'),
             'use_sim_time': LaunchConfiguration('use_sim_time'),
+            'record_bag': LaunchConfiguration('record_bag'),
+            'bag_directory': LaunchConfiguration('bag_directory'),
+            'bag_name': LaunchConfiguration('bag_name'),
         }],
         output='screen'
     )
@@ -199,6 +226,9 @@ def generate_launch_description():
         goal_y_arg,
         goal_yaw_arg,
         timeout_arg,
+        record_bag_arg,
+        bag_directory_arg,
+        bag_name_arg,
         auto_shutdown_arg,
         bringup_launch,
         launch_goal_handler,

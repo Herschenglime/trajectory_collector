@@ -14,7 +14,9 @@
 
 """Sends a navigation goal to Nav2 after verifying AMCL localization and bt_navigator lifecycle."""
 
+from datetime import datetime
 import math
+import os
 import sys
 import time
 
@@ -26,6 +28,7 @@ import rclpy
 from rclpy.action import ActionClient
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+import rosbag2_py
 
 
 def yaw_to_quaternion(yaw: float):
@@ -44,14 +47,25 @@ class NavigateToGoal(Node):
         self.declare_parameter('goal_y', 0.0)
         self.declare_parameter('goal_yaw', 0.0)
         self.declare_parameter('timeout', 120.0)
+        self.declare_parameter('record_bag', True)
+        self.declare_parameter('bag_directory', '')
+        self.declare_parameter('bag_name', '')
+        self.declare_parameter('record_topics', [''])
 
         self.goal_x = float(self.get_parameter('goal_x').value)
         self.goal_y = float(self.get_parameter('goal_y').value)
         self.goal_yaw = float(self.get_parameter('goal_yaw').value)
         self.timeout = float(self.get_parameter('timeout').value)
+        self.record_bag = bool(self.get_parameter('record_bag').value)
+        self.bag_directory = str(self.get_parameter('bag_directory').value)
+        self.bag_name = str(self.get_parameter('bag_name').value)
+        self.record_topics = [
+            t for t in self.get_parameter('record_topics').value if t
+        ]
 
         self.exit_code = 0
         self.is_done = False
+        self._recorder = None
         # Since collect_trajectory launches this node only after set_initial_pose
         # exits cleanly with code 0, AMCL localization is already established.
         self._amcl_ready = True
@@ -143,6 +157,80 @@ class NavigateToGoal(Node):
             )
             self._dispatch_goal()
 
+    def _start_recording(self):
+        """Initialize and start rosbag recording with MCAP storage backend."""
+        try:
+            if not self.bag_directory:
+                bag_dir = os.path.expanduser('~/husky_ws/data/trajectories')
+            else:
+                bag_dir = os.path.expanduser(self.bag_directory)
+            os.makedirs(bag_dir, exist_ok=True)
+
+            if not self.bag_name:
+                bag_name = datetime.now().strftime('traj_%Y%m%d_%H%M%S')
+            else:
+                bag_name = self.bag_name
+
+            bag_uri = os.path.abspath(os.path.join(bag_dir, bag_name))
+
+            if self.record_topics:
+                topics = list(self.record_topics)
+            else:
+                ns = self.get_namespace().rstrip('/')
+                prefix = f'{ns}/' if ns else '/'
+                topics = [
+                    '/tf',
+                    '/tf_static',
+                    f'{prefix}platform/odom',
+                    f'{prefix}amcl_pose',
+                    f'{prefix}cmd_vel',
+                    f'{prefix}sensors/lidar2d_0/scan',
+                    f'{prefix}sensors/lidar2d_0/scan_filtered',
+                    f'{prefix}sensors/camera_0/color/image',
+                    f'{prefix}sensors/camera_0/color/camera_info',
+                ]
+                if ns:
+                    topics.extend([f'{ns}/tf', f'{ns}/tf_static'])
+
+            storage_options = rosbag2_py.StorageOptions(
+                uri=bag_uri,
+                storage_id='mcap'
+            )
+            record_options = rosbag2_py.RecordOptions()
+            record_options.topics = topics
+            record_options.disable_keyboard_controls = True
+            use_sim_time = True
+            if self.has_parameter('use_sim_time'):
+                use_sim_time = bool(self.get_parameter('use_sim_time').value)
+            record_options.use_sim_time = use_sim_time
+
+            self._recorder = rosbag2_py.Recorder(
+                storage_options,
+                record_options,
+                'info',
+                'trajectory_recorder'
+            )
+            self._recorder.start_spin()
+            self._recorder.record()
+            self.get_logger().info(
+                f'Started recording to {bag_uri} (mcap) for {len(topics)} topics.'
+            )
+        except Exception as e:
+            self.get_logger().error(f'Failed to start rosbag recorder: {e}')
+            self._recorder = None
+
+    def _stop_recording(self):
+        """Stop rosbag recording and finalize MCAP bag."""
+        if self._recorder is not None:
+            self.get_logger().info('Stopping rosbag recording and finalizing MCAP bag...')
+            try:
+                self._recorder.stop()
+                self._recorder.stop_spin()
+            except Exception as e:
+                self.get_logger().warn(f'Error while stopping recorder: {e}')
+            finally:
+                self._recorder = None
+
     def _dispatch_goal(self):
         """Send target pose to Nav2 action server."""
         if not self._action_client.wait_for_server(timeout_sec=10.0):
@@ -150,6 +238,9 @@ class NavigateToGoal(Node):
             self.exit_code = 1
             self.is_done = True
             return
+
+        if self.record_bag:
+            self._start_recording()
 
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose.header.frame_id = 'map'
@@ -176,6 +267,7 @@ class NavigateToGoal(Node):
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.get_logger().error('Goal was rejected by Nav2 action server!')
+            self._stop_recording()
             self.exit_code = 1
             self.is_done = True
             return
@@ -198,6 +290,7 @@ class NavigateToGoal(Node):
 
     def _on_result(self, future):
         """Handle final navigation result."""
+        self._stop_recording()
         if self._timeout_timer is not None:
             self._timeout_timer.cancel()
             self._timeout_timer = None
@@ -214,6 +307,7 @@ class NavigateToGoal(Node):
     def _on_timeout(self):
         """Handle navigation timeout event."""
         self.get_logger().error(f'Navigation timed out after {self.timeout:.1f} seconds!')
+        self._stop_recording()
         if self._timeout_timer is not None:
             self._timeout_timer.cancel()
             self._timeout_timer = None
@@ -224,7 +318,8 @@ class NavigateToGoal(Node):
         self.is_done = True
 
     def destroy_node(self):
-        """Clean up timers and subscriptions."""
+        """Clean up timers, subscriptions, and recorder."""
+        self._stop_recording()
         if self._timeout_timer is not None:
             self._timeout_timer.cancel()
             self._timeout_timer = None

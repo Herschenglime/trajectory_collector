@@ -15,6 +15,9 @@
 """Unit tests for NavigateToGoal node and math helpers."""
 
 import math
+import os
+import shutil
+import tempfile
 
 import pytest
 import rclpy
@@ -60,7 +63,37 @@ def test_navigate_to_goal_init():
         assert node.goal_y == 0.0
         assert node.goal_yaw == 0.0
         assert node.timeout == 120.0
+        assert node.record_bag is True
+        assert node.bag_directory == ''
+        assert node.bag_name == ''
+        assert node.record_topics == []
         assert not node.is_done
         assert node.exit_code == 0
     finally:
         node.destroy_node()
+
+
+def test_navigate_to_goal_recording_lifecycle():
+    """Verify recording start and stop lifecycle with rosbag2_py."""
+    test_dir = tempfile.mkdtemp(dir='/home/pgrau/husky_ws')
+    try:
+        node = NavigateToGoal()
+        try:
+            node.bag_directory = test_dir
+            node.bag_name = 'test_traj_bag'
+            node.record_topics = ['/test_topic']
+            node.record_bag = True
+
+            node._start_recording()
+            assert node._recorder is not None
+            node._stop_recording()
+            assert node._recorder is None
+
+            bag_folder = os.path.join(test_dir, 'test_traj_bag')
+            assert os.path.exists(bag_folder)
+            mcap_files = [f for f in os.listdir(bag_folder) if f.endswith('.mcap')]
+            assert len(mcap_files) >= 1
+        finally:
+            node.destroy_node()
+    finally:
+        shutil.rmtree(test_dir, ignore_errors=True)

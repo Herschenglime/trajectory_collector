@@ -16,3 +16,5 @@ src/clearpath_common/
 src/clearpath_config/
 src/clearpath_generator_tests/
 src/clearpath_msgs/
+
+data/trajectories/
