@@ -1,0 +1,3 @@
+trajectory_collector:
+  ros__parameters:
+    publish_rate: 50.0

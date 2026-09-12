@@ -1,0 +1,16 @@
+.DS_Store
+.idea
+*.log
+tmp/
+
+
+.vscode/
+build/
+install/
+log/
+
+# ignore these since clearpath tools will pull them in
+src/clearpath_common/
+src/clearpath_config/
+src/clearpath_generator_tests/
+src/clearpath_msgs/
