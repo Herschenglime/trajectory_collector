@@ -197,14 +197,28 @@ def generate_launch_description():
 
     def on_initial_pose_exit(event, context):
         cmd_str = ' '.join(event.cmd) if event.cmd else ''
-        if (
-            ('set_initial_pose' in cmd_str or 'set_initial_pose' in event.process_name) and
-            event.returncode == 0
-        ):
-            return [
-                LogInfo(msg='AMCL initial pose confirmed. Launching navigate_to_goal node...'),
-                navigate_to_goal_node,
-            ]
+        if 'set_initial_pose' in cmd_str or 'set_initial_pose' in event.process_name:
+            if event.returncode == 0:
+                return [
+                    LogInfo(msg='AMCL initial pose confirmed. Launching navigate_to_goal node...'),
+                    navigate_to_goal_node,
+                ]
+            else:
+                def emulate_ctrl_c(ctx):
+                    try:
+                        os.killpg(os.getpgrp(), signal.SIGINT)
+                    except Exception:
+                        pass
+                    return []
+
+                return [
+                    LogInfo(
+                        msg=f'AMCL initial pose failed (exit code {event.returncode}). '
+                            'Terminating stack...'
+                    ),
+                    OpaqueFunction(function=emulate_ctrl_c),
+                    EmitEvent(event=Shutdown(reason=f'initial_pose_exit_{event.returncode}')),
+                ]
         return None
 
     launch_goal_handler = RegisterEventHandler(

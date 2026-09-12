@@ -63,6 +63,7 @@ def test_navigate_to_goal_init():
         assert node.goal_y == 0.0
         assert node.goal_yaw == 0.0
         assert node.timeout == 120.0
+        assert node.startup_timeout == 45.0
         assert node.record_bag is True
         assert node.bag_directory == ''
         assert node.bag_name == ''

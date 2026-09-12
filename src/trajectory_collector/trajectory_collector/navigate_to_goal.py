@@ -48,6 +48,7 @@ class NavigateToGoal(Node):
         self.declare_parameter('goal_y', 0.0)
         self.declare_parameter('goal_yaw', 0.0)
         self.declare_parameter('timeout', 120.0)
+        self.declare_parameter('startup_timeout', 45.0)
         self.declare_parameter('record_bag', True)
         self.declare_parameter('bag_directory', '')
         self.declare_parameter('bag_name', '')
@@ -57,6 +58,7 @@ class NavigateToGoal(Node):
         self.goal_y = float(self.get_parameter('goal_y').value)
         self.goal_yaw = float(self.get_parameter('goal_yaw').value)
         self.timeout = float(self.get_parameter('timeout').value)
+        self.startup_timeout = float(self.get_parameter('startup_timeout').value)
         self.record_bag = bool(self.get_parameter('record_bag').value)
         self.bag_directory = str(self.get_parameter('bag_directory').value)
         self.bag_name = str(self.get_parameter('bag_name').value)
@@ -77,6 +79,9 @@ class NavigateToGoal(Node):
         self._goal_sent = False
         self._goal_handle = None
         self._timeout_timer = None
+        self._startup_timer = self.create_timer(
+            self.startup_timeout, self._on_startup_timeout
+        )
         self._last_feedback_time = 0.0
 
         self._action_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
@@ -151,6 +156,9 @@ class NavigateToGoal(Node):
             self._costmap_ready and
             not self._goal_sent
         ):
+            if self._startup_timer is not None:
+                self._startup_timer.cancel()
+                self._startup_timer = None
             self._goal_sent = True
             self._start_time = time.monotonic()
             self.get_logger().info(
@@ -159,6 +167,27 @@ class NavigateToGoal(Node):
                 f'yaw={self.goal_yaw:.3f} rad)'
             )
             self._dispatch_goal()
+
+    def _on_startup_timeout(self):
+        """Handle timeout waiting for navigation stack readiness."""
+        if self._startup_timer is not None:
+            self._startup_timer.cancel()
+            self._startup_timer = None
+        if self._goal_sent:
+            return
+
+        missing = []
+        if not self._bt_navigator_ready:
+            missing.append('bt_navigator')
+        if not self._costmap_ready:
+            missing.append('local_costmap')
+        self.get_logger().error(
+            f'Timed out after {self.startup_timeout:.1f}s waiting for prerequisites: '
+            f'{", ".join(missing)}. Navigation aborted.'
+        )
+        self.exit_code = 2
+        self.is_done = True
+        self._write_status()
 
     def _start_recording(self):
         """Initialize and start rosbag recording with MCAP storage backend."""
@@ -351,6 +380,9 @@ class NavigateToGoal(Node):
     def destroy_node(self):
         """Clean up timers, subscriptions, and recorder."""
         self._stop_recording()
+        if self._startup_timer is not None:
+            self._startup_timer.cancel()
+            self._startup_timer = None
         if self._timeout_timer is not None:
             self._timeout_timer.cancel()
             self._timeout_timer = None

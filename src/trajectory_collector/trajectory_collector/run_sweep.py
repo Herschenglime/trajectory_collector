@@ -271,8 +271,8 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         '--cooldown',
         type=float,
-        default=3.0,
-        help='Cooldown pause in seconds between runs (default: 3.0)'
+        default=5.0,
+        help='Cooldown pause in seconds between runs (default: 5.0)'
     )
     parser.add_argument(
         '--headless',

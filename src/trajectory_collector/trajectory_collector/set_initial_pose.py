@@ -79,14 +79,18 @@ class InitialPosePublisher(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = InitialPosePublisher()
+    exit_code = 0
     try:
         rclpy.spin(node)
-    except (KeyboardInterrupt, ExternalShutdownException, SystemExit):
-        pass
+    except SystemExit as err:
+        exit_code = err.code if isinstance(err.code, int) else 1
+    except (KeyboardInterrupt, ExternalShutdownException):
+        exit_code = 130
     finally:
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+    sys.exit(exit_code)
 
 
 if __name__ == '__main__':
