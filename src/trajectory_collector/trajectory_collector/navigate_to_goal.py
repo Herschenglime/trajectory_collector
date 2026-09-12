@@ -15,6 +15,7 @@
 """Sends a navigation goal to Nav2 after verifying AMCL localization and bt_navigator lifecycle."""
 
 from datetime import datetime
+import json
 import math
 import os
 import sys
@@ -66,6 +67,8 @@ class NavigateToGoal(Node):
         self.exit_code = 0
         self.is_done = False
         self._recorder = None
+        self._bag_uri = None
+        self._start_time = None
         # Since collect_trajectory launches this node only after set_initial_pose
         # exits cleanly with code 0, AMCL localization is already established.
         self._amcl_ready = True
@@ -172,6 +175,7 @@ class NavigateToGoal(Node):
                 bag_name = self.bag_name
 
             bag_uri = os.path.abspath(os.path.join(bag_dir, bag_name))
+            self._bag_uri = bag_uri
 
             if self.record_topics:
                 topics = list(self.record_topics)
@@ -288,6 +292,31 @@ class NavigateToGoal(Node):
             dist = feedback.distance_remaining
             self.get_logger().info(f'Navigating... Distance remaining: {dist:.2f} m')
 
+    def _write_status(self):
+        """Write execution status JSON file into the trajectory directory."""
+        bag_uri = self._bag_uri
+        if not bag_uri:
+            bag_dir = os.path.expanduser(self.bag_directory or '~/husky_ws/data/trajectories')
+            bag_name = self.bag_name or 'latest'
+            bag_uri = os.path.abspath(os.path.join(bag_dir, bag_name))
+
+        os.makedirs(bag_uri, exist_ok=True)
+        status_file = os.path.join(bag_uri, 'status.json')
+
+        status_map = {0: 'SUCCESS', 1: 'FAILED', 2: 'TIMEOUT', 130: 'ABORTED'}
+        status_str = status_map.get(self.exit_code, f'ERROR_{self.exit_code}')
+        duration = (time.monotonic() - self._start_time) if self._start_time else 0.0
+
+        try:
+            with open(status_file, 'w', encoding='utf-8') as f:
+                json.dump({
+                    'status': status_str,
+                    'exit_code': self.exit_code,
+                    'duration_s': round(duration, 2),
+                }, f, indent=2)
+        except Exception as e:
+            self.get_logger().warn(f'Failed to write status file: {e}')
+
     def _on_result(self, future):
         """Handle final navigation result."""
         self._stop_recording()
@@ -302,6 +331,7 @@ class NavigateToGoal(Node):
         else:
             self.get_logger().error(f'Navigation failed with status code: {status}')
             self.exit_code = 1
+        self._write_status()
         self.is_done = True
 
     def _on_timeout(self):
@@ -315,6 +345,7 @@ class NavigateToGoal(Node):
             self.get_logger().info('Cancelling active goal...')
             self._goal_handle.cancel_goal_async()
         self.exit_code = 2
+        self._write_status()
         self.is_done = True
 
     def destroy_node(self):
@@ -323,10 +354,12 @@ class NavigateToGoal(Node):
         if self._timeout_timer is not None:
             self._timeout_timer.cancel()
             self._timeout_timer = None
+        self._write_status()
         super().destroy_node()
 
 
 def main(args=None):
+    """Run NavigateToGoal node until goal reached, timeout, or shutdown."""
     rclpy.init(args=args)
     node = NavigateToGoal()
 

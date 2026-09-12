@@ -16,6 +16,7 @@
 
 import argparse
 import csv
+import json
 import math
 import os
 from pathlib import Path
@@ -153,7 +154,7 @@ def run_single_trajectory(
     traj: Dict[str, Any],
     output_dir: str,
     timeout: float = 300.0
-) -> Tuple[int, float, str]:
+) -> Tuple[str, int, float, str]:
     """Execute a single trajectory using LaunchService."""
     traj_id = int(traj['id'])
     bag_name = f'traj_{traj_id:03d}'
@@ -183,10 +184,32 @@ def run_single_trajectory(
     ls.include_launch_description(ld)
 
     start_time = time.monotonic()
-    exit_code = ls.run()
+    raw_exit_code = 0
+    try:
+        raw_exit_code = ls.run()
+    except KeyboardInterrupt:
+        duration = time.monotonic() - start_time
+        return 'ABORTED', 130, duration, bag_path
+
     duration = time.monotonic() - start_time
 
-    return exit_code, duration, bag_path
+    # Inspect status.json written directly by navigate_to_goal node
+    status_file = os.path.join(bag_path, 'status.json')
+    if os.path.isfile(status_file):
+        try:
+            with open(status_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                status = str(data.get('status', 'SUCCESS'))
+                exit_code = int(data.get('exit_code', 0))
+                duration = float(data.get('duration_s', duration))
+                return status, exit_code, duration, bag_path
+        except Exception:
+            pass
+
+    # If status.json does not exist, navigation never completed
+    if raw_exit_code != 0:
+        return f'ERROR_{raw_exit_code}', raw_exit_code, duration, bag_path
+    return 'INIT_FAILED', 1, duration, bag_path
 
 
 def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
@@ -276,19 +299,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f'Destination: {os.path.abspath(args.output_dir)}')
     print(f'Timeout per trajectory: {args.timeout:.1f}s')
 
-    interrupted = False
     for idx, traj in enumerate(selected, start=1):
         traj_id = traj.get('id', idx - 1)
         print(f'\n=== [{idx}/{total}] Trajectory ID {traj_id} ===')
         print(f'  Start: ({traj["start_x"]}, {traj["start_y"]})')
         print(f'  Goal:  ({traj["goal_x"]}, {traj["goal_y"]})')
 
+        status = 'FAILED'
         exit_code = 1
         duration = 0.0
         bag_path = os.path.join(args.output_dir, f'traj_{int(traj_id):03d}')
 
         try:
-            exit_code, duration, bag_path = run_single_trajectory(
+            status, exit_code, duration, bag_path = run_single_trajectory(
                 launch_file=launch_file,
                 traj=traj,
                 output_dir=args.output_dir,
@@ -296,13 +319,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             )
         except KeyboardInterrupt:
             print('\n[Sweep] Interrupted by user (Ctrl-C).')
+            status = 'ABORTED'
             exit_code = 130
-            interrupted = True
-        except Exception as exc:
-            print(f'\n[Sweep] Unexpected error during trajectory execution: {exc}')
-            exit_code = 99
 
-        status = format_status(exit_code)
         print(f'  Result: {status} (code {exit_code}) in {duration:.1f}s')
 
         # Append row immediately
@@ -320,7 +339,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         }
         append_summary_row(summary_path, summary_row)
 
-        if interrupted:
+        if status == 'ABORTED':
             print('Sweep aborted due to interrupt.')
             return 130
 
