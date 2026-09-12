@@ -72,6 +72,24 @@ def generate_launch_description():
         description='Clearpath setup path containing robot.yaml'
     )
 
+    x_arg = DeclareLaunchArgument(
+        'x',
+        default_value='0.0',
+        description='Robot spawn and initial pose X coordinate'
+    )
+
+    y_arg = DeclareLaunchArgument(
+        'y',
+        default_value='0.0',
+        description='Robot spawn and initial pose Y coordinate'
+    )
+
+    yaw_arg = DeclareLaunchArgument(
+        'yaw',
+        default_value='0.0',
+        description='Robot spawn and initial pose Yaw orientation (radians)'
+    )
+
     # 1. Clearpath Gazebo simulation
     simulation_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -81,6 +99,9 @@ def generate_launch_description():
             ('world', LaunchConfiguration('world')),
             ('use_sim_time', LaunchConfiguration('use_sim_time')),
             ('setup_path', LaunchConfiguration('setup_path')),
+            ('x', LaunchConfiguration('x')),
+            ('y', LaunchConfiguration('y')),
+            ('yaw', LaunchConfiguration('yaw')),
         ]
     )
 
@@ -129,9 +150,23 @@ def generate_launch_description():
         ]
     )
 
+    # 6. Automatic initial pose publisher (runs with Nav2 after sim_gate opens)
+    initial_pose_node = Node(
+        package='trajectory_collector',
+        executable='set_initial_pose',
+        namespace=LaunchConfiguration('namespace'),
+        parameters=[{
+            'x': LaunchConfiguration('x'),
+            'y': LaunchConfiguration('y'),
+            'yaw': LaunchConfiguration('yaw'),
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+        }],
+        output='screen'
+    )
+
     def on_sim_ready(event, context):
         if event.returncode == 0:
-            return [nav2_launch, localization_launch, viz_launch]
+            return [nav2_launch, localization_launch, viz_launch, initial_pose_node]
         msg = f'Sim gate failed (exit code {event.returncode}); navigation stack aborted.'
         return [LogInfo(msg=msg)]
 
@@ -148,6 +183,9 @@ def generate_launch_description():
         world_arg,
         map_arg,
         setup_path_arg,
+        x_arg,
+        y_arg,
+        yaw_arg,
         simulation_launch,
         sim_gate,
         start_nav_event,

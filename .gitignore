@@ -9,6 +9,8 @@ build/
 install/
 log/
 
+__pycache__/
+
 # ignore these since clearpath tools will pull them in
 src/clearpath_common/
 src/clearpath_config/
