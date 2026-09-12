@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Trajectory sweep runner for batch data collection using LaunchService."""
+"""Trajectory sweep runner for batch data collection."""
 
 import argparse
 import csv
@@ -20,14 +20,13 @@ import json
 import math
 import os
 from pathlib import Path
+import signal
+import subprocess
 import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
-from launch import LaunchService
-from launch.actions import IncludeLaunchDescription
-from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 
 def validate_output_directory(output_dir: str, overwrite: bool = False) -> None:
@@ -155,7 +154,7 @@ def run_single_trajectory(
     output_dir: str,
     timeout: float = 300.0
 ) -> Tuple[str, int, float, str]:
-    """Execute a single trajectory using LaunchService."""
+    """Execute a single trajectory in an isolated process session."""
     traj_id = int(traj['id'])
     bag_name = f'traj_{traj_id:03d}'
     bag_path = os.path.join(output_dir, bag_name)
@@ -163,33 +162,50 @@ def run_single_trajectory(
     start_yaw = parse_yaw(traj, 'start')
     goal_yaw = parse_yaw(traj, 'goal')
 
-    launch_args = [
-        ('start_x', str(traj['start_x'])),
-        ('start_y', str(traj['start_y'])),
-        ('start_yaw', f'{start_yaw:.4f}'),
-        ('goal_x', str(traj['goal_x'])),
-        ('goal_y', str(traj['goal_y'])),
-        ('goal_yaw', f'{goal_yaw:.4f}'),
-        ('timeout', str(timeout)),
-        ('bag_directory', os.path.abspath(output_dir)),
-        ('bag_name', bag_name),
-        ('auto_shutdown', 'true'),
+    cmd = [
+        'ros2', 'launch', launch_file,
+        f'start_x:={traj["start_x"]}',
+        f'start_y:={traj["start_y"]}',
+        f'start_yaw:={start_yaw:.4f}',
+        f'goal_x:={traj["goal_x"]}',
+        f'goal_y:={traj["goal_y"]}',
+        f'goal_yaw:={goal_yaw:.4f}',
+        f'timeout:={timeout}',
+        f'bag_directory:={os.path.abspath(output_dir)}',
+        f'bag_name:={bag_name}',
+        'auto_shutdown:=true',
     ]
-
-    ls = LaunchService()
-    ld = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(launch_file),
-        launch_arguments=launch_args,
-    )
-    ls.include_launch_description(ld)
 
     start_time = time.monotonic()
     raw_exit_code = 0
+    proc = None
     try:
-        raw_exit_code = ls.run()
+        proc = subprocess.Popen(cmd, start_new_session=True)
+        raw_exit_code = proc.wait(timeout=timeout + 60.0)
     except KeyboardInterrupt:
+        if proc and proc.poll() is None:
+            try:
+                os.killpg(proc.pid, signal.SIGINT)
+                proc.wait(timeout=15.0)
+            except Exception:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except Exception:
+                    pass
         duration = time.monotonic() - start_time
         return 'ABORTED', 130, duration, bag_path
+    except subprocess.TimeoutExpired:
+        if proc and proc.poll() is None:
+            try:
+                os.killpg(proc.pid, signal.SIGINT)
+                proc.wait(timeout=15.0)
+            except Exception:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except Exception:
+                    pass
+        duration = time.monotonic() - start_time
+        return 'TIMEOUT', 2, duration, bag_path
 
     duration = time.monotonic() - start_time
 
