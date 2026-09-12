@@ -12,12 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+import signal
+
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     EmitEvent,
     IncludeLaunchDescription,
     LogInfo,
+    OpaqueFunction,
     RegisterEventHandler,
 )
 from launch.conditions import IfCondition
@@ -201,14 +205,28 @@ def generate_launch_description():
         )
     )
 
+    def on_navigation_exit(event, context):
+        def emulate_ctrl_c(ctx):
+            try:
+                os.killpg(os.getpgrp(), signal.SIGINT)
+            except Exception:
+                pass
+            return []
+
+        return [
+            LogInfo(
+                msg=f'Trajectory navigation completed (exit code {event.returncode}). '
+                    'Emulating Ctrl-C (SIGINT to process group)...'
+            ),
+            OpaqueFunction(function=emulate_ctrl_c),
+            EmitEvent(event=Shutdown(reason=f'navigation_exit_{event.returncode}')),
+        ]
+
     # Optional automatic shutdown handler when goal node finishes
     auto_shutdown_handler = RegisterEventHandler(
         OnProcessExit(
             target_action=navigate_to_goal_node,
-            on_exit=[
-                LogInfo(msg='Trajectory navigation completed. Triggering stack shutdown...'),
-                EmitEvent(event=Shutdown(reason='Trajectory navigation finished'))
-            ]
+            on_exit=on_navigation_exit
         ),
         condition=IfCondition(LaunchConfiguration('auto_shutdown'))
     )
