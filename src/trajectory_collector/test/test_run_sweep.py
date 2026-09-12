@@ -25,6 +25,7 @@ from trajectory_collector.run_sweep import (
     filter_waypoints,
     format_status,
     load_waypoints,
+    parse_args,
     parse_yaw,
     validate_output_directory,
 )
@@ -206,3 +207,18 @@ def test_append_summary_row(tmp_path: Path):
         assert len(reader) == 3  # Header not repeated!
         assert reader[2][0] == '1'
         assert reader[2][1] == 'TIMEOUT'
+
+
+def test_parse_args():
+    """Test CLI argument parsing including --headless flag."""
+    # Default behavior
+    args_default = parse_args([])
+    assert args_default.headless is False
+    assert args_default.overwrite is False
+    assert args_default.count is None
+
+    # Explicit --headless
+    args_headless = parse_args(['--headless', '-n', '5', '--overwrite'])
+    assert args_headless.headless is True
+    assert args_headless.count == 5
+    assert args_headless.overwrite is True

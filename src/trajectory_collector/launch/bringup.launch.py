@@ -19,6 +19,7 @@ from launch.actions import (
     LogInfo,
     RegisterEventHandler,
 )
+from launch.conditions import UnlessCondition
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import (
@@ -32,7 +33,7 @@ from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     # Package share lookups
-    pkg_clearpath_gz = FindPackageShare('clearpath_gz')
+    pkg_trajectory_collector = FindPackageShare('trajectory_collector')
     pkg_clearpath_nav2_demos = FindPackageShare('clearpath_nav2_demos')
     pkg_clearpath_viz = FindPackageShare('clearpath_viz')
 
@@ -90,10 +91,17 @@ def generate_launch_description():
         description='Robot spawn and initial pose Yaw orientation (radians)'
     )
 
-    # 1. Clearpath Gazebo simulation
+    headless_arg = DeclareLaunchArgument(
+        'headless',
+        default_value='false',
+        choices=['true', 'false'],
+        description='Run Gazebo headless (-s) and disable RViz'
+    )
+
+    # 1. Simulation launch (forked clearpath_gz simulation with headless support)
     simulation_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            PathJoinSubstitution([pkg_clearpath_gz, 'launch', 'simulation.launch.py'])
+            PathJoinSubstitution([pkg_trajectory_collector, 'launch', 'simulation.launch.py'])
         ),
         launch_arguments=[
             ('world', LaunchConfiguration('world')),
@@ -102,6 +110,7 @@ def generate_launch_description():
             ('x', LaunchConfiguration('x')),
             ('y', LaunchConfiguration('y')),
             ('yaw', LaunchConfiguration('yaw')),
+            ('headless', LaunchConfiguration('headless')),
         ]
     )
 
@@ -148,7 +157,7 @@ def generate_launch_description():
         ]
     )
 
-    # 5. Clearpath RViz visualization (conditioned on sim_gate)
+    # 5. Clearpath RViz visualization (conditioned on sim_gate and headless=false)
     viz_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([pkg_clearpath_viz, 'launch', 'view_navigation.launch.py'])
@@ -156,7 +165,8 @@ def generate_launch_description():
         launch_arguments=[
             ('namespace', LaunchConfiguration('namespace')),
             ('use_sim_time', LaunchConfiguration('use_sim_time')),
-        ]
+        ],
+        condition=UnlessCondition(LaunchConfiguration('headless'))
     )
 
     # 6. LiDAR self-filter (removes sensor arch returns hitting robot footprint)
@@ -216,6 +226,7 @@ def generate_launch_description():
         x_arg,
         y_arg,
         yaw_arg,
+        headless_arg,
         simulation_launch,
         sim_gate,
         start_nav_event,

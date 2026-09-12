@@ -152,6 +152,13 @@ def generate_launch_description():
         description='Automatically terminate entire stack when navigation finishes'
     )
 
+    headless_arg = DeclareLaunchArgument(
+        'headless',
+        default_value='false',
+        choices=['true', 'false'],
+        description='Run simulation and navigation without GUI (Gazebo server-only, no RViz)'
+    )
+
     # 1. Full system bringup (Gazebo, sim_gate, Nav2, localization, RViz, scan_self_filter)
     bringup_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -166,6 +173,7 @@ def generate_launch_description():
             ('x', LaunchConfiguration('start_x')),
             ('y', LaunchConfiguration('start_y')),
             ('yaw', LaunchConfiguration('start_yaw')),
+            ('headless', LaunchConfiguration('headless')),
         ]
     )
 
@@ -248,6 +256,7 @@ def generate_launch_description():
         bag_directory_arg,
         bag_name_arg,
         auto_shutdown_arg,
+        headless_arg,
         bringup_launch,
         launch_goal_handler,
         auto_shutdown_handler,

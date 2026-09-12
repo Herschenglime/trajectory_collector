@@ -152,7 +152,8 @@ def run_single_trajectory(
     launch_file: str,
     traj: Dict[str, Any],
     output_dir: str,
-    timeout: float = 300.0
+    timeout: float = 300.0,
+    headless: bool = False
 ) -> Tuple[str, int, float, str]:
     """Execute a single trajectory in an isolated process session."""
     traj_id = int(traj['id'])
@@ -174,6 +175,7 @@ def run_single_trajectory(
         f'bag_directory:={os.path.abspath(output_dir)}',
         f'bag_name:={bag_name}',
         'auto_shutdown:=true',
+        f'headless:={"true" if headless else "false"}',
     ]
 
     start_time = time.monotonic()
@@ -272,6 +274,11 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
         default=3.0,
         help='Cooldown pause in seconds between runs (default: 3.0)'
     )
+    parser.add_argument(
+        '--headless',
+        action='store_true',
+        help='Run simulation headless without Gazebo GUI or RViz (default: False)'
+    )
     return parser.parse_args(args)
 
 
@@ -314,6 +321,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f'Starting trajectory sweep: {total} run(s) scheduled.')
     print(f'Destination: {os.path.abspath(args.output_dir)}')
     print(f'Timeout per trajectory: {args.timeout:.1f}s')
+    print(f'Headless mode: {args.headless}')
 
     for idx, traj in enumerate(selected, start=1):
         traj_id = traj.get('id', idx - 1)
@@ -331,7 +339,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 launch_file=launch_file,
                 traj=traj,
                 output_dir=args.output_dir,
-                timeout=args.timeout
+                timeout=args.timeout,
+                headless=args.headless,
             )
         except KeyboardInterrupt:
             print('\n[Sweep] Interrupted by user (Ctrl-C).')
