@@ -125,6 +125,42 @@ ros2 run trajectory_collector generate_waypoints \
 
 ---
 
+### 5. Automated Batch Trajectory Sweep (`run_sweep`)
+
+Execute multiple trajectory runs sequentially in cold-restart isolation, using native ROS 2 `LaunchService` process supervision:
+
+```bash
+# Run all waypoints in data/waypoints.csv
+ros2 run trajectory_collector run_sweep -w data/waypoints.csv -o data/trajectories
+
+# Run a subset of 3 trajectories starting at trajectory ID 2
+ros2 run trajectory_collector run_sweep -w data/waypoints.csv -o data/trajectories -n 3 --start-id 2
+
+# Resume into an existing non-empty directory
+ros2 run trajectory_collector run_sweep -w data/waypoints.csv -o data/trajectories --overwrite --start-id 5
+```
+
+#### Key Characteristics
+* **Zero State Leakage**: Each trajectory spins up a fresh simulation and terminates cleanly via `auto_shutdown:=true`.
+* **Supervised Lifecycle**: Process lifecycle managed by `launch.LaunchService` with clean child process termination and signal handling.
+* **Append-Only Summary**: Flushes run metrics immediately to `sweep_summary.csv` (`id,status,exit_code,duration_s,distance,start_x,start_y,goal_x,goal_y,bag_path`).
+* **Pre-flight Safety**: Halts immediately if destination directory already exists and contains data, unless `--overwrite` is specified.
+* **Fixed 5-Minute Safety Ceiling**: Default 300-second timeout halts stubborn planning loops while allowing nominal runs to finish and exit immediately.
+
+#### CLI Options
+
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `-w`, `--waypoints` | `data/waypoints.csv` | Path to waypoints CSV file |
+| `-o`, `--output-dir`| `data/trajectories` | Directory for output rosbags and `sweep_summary.csv` |
+| `--overwrite` | `false` | Allow writing into an existing non-empty destination directory |
+| `-n`, `--count` | `None` (all) | Maximum number of trajectories to run |
+| `--start-id` | `0` | Trajectory ID to start from (useful for resuming) |
+| `--timeout` | `300.0` | Maximum seconds allowed per trajectory (5 minutes) |
+| `--cooldown` | `3.0` | Pause seconds between consecutive runs |
+
+---
+
 ## Recorded Data (MCAP Format)
 
 Trajectories are recorded in the corruption-resilient **MCAP** storage format. The recorded topics capture the minimal set required for 6-DOF spatial path reconstruction plus perception streams:
@@ -159,6 +195,7 @@ Because files are stored in native `.mcap` format, you can also drag and drop th
 * [`view_bag.launch.py`](launch/view_bag.launch.py): Single-command bag playback and RViz visualizer.
 * [`bringup.launch.py`](launch/bringup.launch.py): Simulation and navigation bringup with gated synchronization.
 * [`generate_waypoints.py`](trajectory_collector/generate_waypoints.py): Offline planner sampling reachable, clearance-verified waypoint pairs.
+* [`run_sweep.py`](trajectory_collector/run_sweep.py): Batch orchestrator executing sequential cold restarts supervised by `launch.LaunchService`.
 * [`navigate_to_goal.py`](trajectory_collector/navigate_to_goal.py): Event-driven node verifying bt_navigator/costmap readiness, dispatching goal, and managing `rosbag2_py` lifecycle.
 * [`scan_self_filter.py`](trajectory_collector/scan_self_filter.py): Geometric filter masking out Husky sensor arch reflections.
 * [`set_initial_pose.py`](trajectory_collector/set_initial_pose.py): Publishes initial pose to AMCL on stack startup.
